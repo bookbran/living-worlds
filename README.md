@@ -2,6 +2,10 @@
 
 Living worlds builds a 3D world of any place on Earth that you can fly through, listen to and share as one file. Ask your agent for Multnomah Falls and it studies the place first (which trees grow there and where, what grows under them, which birds live there, what color the buildings are), then builds the world from public data in about four minutes.
 
+![A living world of a Portland neighborhood in fall: red and yellow maples along the streets, Douglas firs, bungalows and a white church with a spire, beside the panel with its time of day, season, wind and sound controls, the evening's crows and geese, and the places to visit](docs/img/ne-41st-dash.jpg)
+
+![A living world of the Columbia River Gorge: the Bridge of the Gods over the river, with a forest of firs, cedars and maples climbing the slopes](docs/img/bridge-of-the-gods.jpg)
+
 Here's what goes into a world:
 
 - **The ground and the trees.** Where the US has flown a USGS lidar survey, the world uses the laser's own ground and every treetop it saw, under a NAIP aerial photo. Everywhere else, it grows trees from the vegetation in a Sentinel-2 satellite photo and estimates their heights.
