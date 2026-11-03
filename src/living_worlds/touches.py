@@ -3,7 +3,7 @@
 a great way by hundreds of people later"). The rules a contributor's agent follows are
 in touches/TOUCH.md; this enforces them.
 
-In Groundstation, build_world(touches_dir=...) lays them on; each touch is a folder under
+In living worlds, build_world(touches_dir=...) lays them on; each touch is a folder under
 <touches_dir>/<world slug>/.
 
 Each touch is resolved to today's build (a building by its permanent id, a place by
@@ -24,7 +24,7 @@ TOUCHES = os.path.join(HERE, 'touches')
 BLOCK_M = 250
 EACH = {'texture_px': 1024, 'texture_bytes': 600_000, 'sound_bytes': 1_500_000, 'creatures': 6}
 BLOCK = {'texture_bytes': 2_000_000, 'sound_bytes': 3_000_000, 'creatures': 12, 'touches': 40}
-KINDS = ('facade', 'material', 'rule', 'creature', 'sound')
+KINDS = ('facade', 'material', 'rule', 'tree', 'creature', 'sound', 'vehicle', 'paint', 'building', 'porch', 'gate', 'fence', 'windows', 'garden', 'ground', 'steeple', 'fins', 'sign', 'bench', 'storefront', 'tileroof')
 
 
 def image_size(path):
@@ -67,8 +67,11 @@ def lay(meta, slug, out_dir, local=None, root=None):
     found.sort(key=lambda t: (t.get('added', '9999'), t.get('id', '')))   # earlier touches keep their place
     buildings = {}
     for b in meta.get('buildings', []):
-        if b.get('id'):
-            buildings.setdefault(b['id'], []).append(b)
+        if 'c' not in b and b.get('p'):
+            b = dict(b, c=[sum(q[0] for q in b['p']) / len(b['p']), sum(q[1] for q in b['p']) / len(b['p'])])
+        for key in [b.get('id')] + list(b.get('also') or []):   # Portland's footprints keep the OpenStreetMap ids they replaced
+            if key:
+                buildings.setdefault(key, []).append(b)
     places = {p['name']: p for p in ((meta.get('city') or {}).get('places') or [])}
     used, touches, report = {}, [], []
     shutil.rmtree(os.path.join(out_dir, 'touches'), ignore_errors=True)
@@ -81,9 +84,17 @@ def lay(meta, slug, out_dir, local=None, root=None):
             turn(t, t['_bad'], 'Fix the file and it will be laid on at the next build.'); continue
         kind, a = t.get('kind'), t.get('anchor') or {}
         if kind not in KINDS:
-            turn(t, f'"{kind}" is not a kind of touch yet', 'Use facade, material, rule, creature or sound.'); continue
+            turn(t, f'"{kind}" is not a kind of touch yet', 'Use facade, material, rule, tree, creature, sound, vehicle, paint, building, porch, gate, fence, windows, garden, ground, steeple, fins, sign, bench, storefront or tileroof.'); continue
         # where it hangs
-        if 'building' in a:
+        if 'building' in a and str(a['building']).startswith('touch:'):
+            # hung on a building another touch adds: it stands where that touch does
+            host = next((h for h in found if 'touch:' + str(h.get('id')) == a['building']), None)
+            hat = ((host or {}).get('anchor') or {}).get('at')
+            if not hat or not local:
+                report.append({'id': t['id'], 'title': t.get('title') or t['id'], 'by': t.get('by', ''), 'status': 'waiting',
+                               'why': f'no building touch called {a["building"][6:]}', 'fix': 'It comes back when that touch is added.'}); continue
+            xy = local([hat[0]], [hat[1]])[0]
+        elif 'building' in a:
             pieces = buildings.get(a['building'])
             if not pieces:
                 report.append({'id': t['id'], 'title': t.get('title') or t['id'], 'by': t.get('by', ''), 'status': 'waiting',
@@ -148,12 +159,87 @@ def lay(meta, slug, out_dir, local=None, root=None):
         os.makedirs(dest, exist_ok=True)
         for fn in files:
             shutil.copy2(os.path.join(t['_dir'], fn), os.path.join(dest, fn))
+        fp = (t.get('building') or {}).get('footprint_lonlat') if kind == 'building' else None
+        if fp and local:   # a building with its own real outline
+            t['footprint'] = local([q[0] for q in fp], [q[1] for q in fp])
         clean = {k: v for k, v in t.items() if not k.startswith('_')}
         clean['xy'] = [round(xy[0], 1), round(xy[1], 1)]
         clean['dir'] = 'touches/' + t['id'] + '/'
         touches.append(clean)
         report.append({'id': t['id'], 'title': t.get('title') or t['id'], 'by': t.get('by', ''), 'status': 'in', 'why': '', 'fix': ''})
+    ground(meta, out_dir, touches)
     return touches, report
+
+
+def ground(meta, out_dir, touches):
+    """GROUND PATCHES (2026-11-01, Dan: "can you remove the satellite flattened cars from the driveway?"):
+    a ground touch paints a rectangle of the aerial photo over with the surface round it (its border's
+    median colour with a little grain), and takes away any car the photo detection stood there. The
+    untouched photo is kept as core_photo.orig.jpg, so every lay starts from it."""
+    patches = [t for t in touches if t.get('kind') == 'ground' and t.get('xy')]
+    photo, orig = os.path.join(out_dir, 'core_photo.jpg'), os.path.join(out_dir, 'core_photo.orig.jpg')
+    if not os.path.isfile(photo):
+        return
+    if not patches and not os.path.isfile(orig):
+        return
+    try:
+        import numpy as np
+        import rasterio
+        import warnings
+        warnings.filterwarnings('ignore')
+    except Exception:
+        return
+    # the untouched photo is kept beside it; when the builder has written a fresh photo since the last
+    # patch (a rebuild, 2026-11-02: a stale copy once painted the old, smaller world over the new one),
+    # that fresh photo becomes the untouched copy
+    mark = os.path.join(out_dir, 'core_photo.patched')
+    wrote = open(mark).read().strip() if os.path.isfile(mark) else ''
+    if not os.path.isfile(orig) or str(os.path.getmtime(photo)) != wrote:
+        shutil.copy2(photo, orig)
+    with rasterio.open(orig) as src:
+        img = src.read().astype(np.float32)
+    _, H, W = img.shape
+    e = meta['core']['extent']
+    rng = np.random.default_rng(41)
+    for t in patches:
+        g = t.get('ground') or {}
+        w, d = g.get('size_m', [4, 4])
+        x, y = t['xy']
+        c0, c1 = int((x - w / 2 - e[0]) / (e[2] - e[0]) * W), int((x + w / 2 - e[0]) / (e[2] - e[0]) * W)
+        r0, r1 = int((e[3] - (y + d / 2)) / (e[3] - e[1]) * H), int((e[3] - (y - d / 2)) / (e[3] - e[1]) * H)
+        c0, r0, c1, r1 = max(0, c0), max(0, r0), min(W, c1), min(H, r1)
+        if c1 - c0 < 2 or r1 - r0 < 2:
+            continue
+        pad = 4
+        ring = np.concatenate([img[:, max(0, r0 - pad):r0, c0:c1].reshape(3, -1), img[:, r1:r1 + pad, c0:c1].reshape(3, -1),
+                               img[:, r0:r1, max(0, c0 - pad):c0].reshape(3, -1), img[:, r0:r1, c1:c1 + pad].reshape(3, -1)], axis=1)
+        cl = g.get('clone_from_m')   # [dx, dy]: copy the real surface from a clean stretch this far away
+        if cl:
+            dc, dr = int(round(cl[0] / (e[2] - e[0]) * W)), int(round(-cl[1] / (e[3] - e[1]) * H))
+            if 0 <= r0 + dr and r1 + dr <= H and 0 <= c0 + dc and c1 + dc <= W:
+                fill = img[:, r0 + dr:r1 + dr, c0 + dc:c1 + dc].copy()
+            else:
+                cl = None
+        if not cl:
+            if g.get('colour'):
+                h = g['colour'].lstrip('#'); med = np.array([int(h[i:i + 2], 16) for i in (0, 2, 4)], np.float32)
+            else:
+                med = np.median(ring, axis=1)
+            fill = med[:, None, None] + rng.normal(0, 3.5, (1, r1 - r0, c1 - c0))
+        # feather the edge two pixels in so the patch does not read as a box
+        yy, xx = np.mgrid[r0:r1, c0:c1]
+        edge = np.minimum.reduce([yy - r0, r1 - 1 - yy, xx - c0, c1 - 1 - xx]).astype(np.float32)
+        a = np.clip(edge / 3.0, 0, 1)[None]
+        img[:, r0:r1, c0:c1] = img[:, r0:r1, c0:c1] * (1 - a) + fill * a
+        meta['vehicles'] = [v for v in meta.get('vehicles', []) if not (abs(v['at'][0] - x) < w / 2 and abs(v['at'][1] - y) < d / 2)]
+    with rasterio.open(orig) as src:
+        prof = src.profile
+    prof.update(driver='JPEG', QUALITY=92)
+    prof.pop('tiled', None); prof.pop('blockxsize', None); prof.pop('blockysize', None); prof.pop('compress', None)
+    with rasterio.open(photo, 'w', **prof) as dst:
+        dst.write(np.clip(img, 0, 255).astype(np.uint8))
+    with open(mark, 'w') as f:
+        f.write(str(os.path.getmtime(photo)))
 
 
 def main():

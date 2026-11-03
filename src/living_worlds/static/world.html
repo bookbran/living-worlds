@@ -81,6 +81,10 @@
   #compass .ring { width: 104px; height: 104px; cursor: grab; touch-action: none; filter: drop-shadow(0 2px 8px rgba(0,0,0,.35)); }
   #compass .ring:active { cursor: grabbing; }
   #compass .ring circle { fill: rgba(21,18,15,.55); stroke: rgba(243,237,228,.35); stroke-width: 2; }
+  .seasons { display: flex; gap: 2px; flex: 1; }
+  .seasons button { flex: 1; background: none; border: 0; color: inherit; font: inherit; font-size: 12px; opacity: .55; padding: 3px 2px; cursor: pointer; }
+  .seasons button:hover { opacity: .85; }
+  .seasons button[aria-pressed="true"] { opacity: 1; text-decoration: underline; text-decoration-color: #E84A2F; text-decoration-thickness: 2px; text-underline-offset: 5px; }
   #compass .needle { transform-origin: 50px 50px; transform-box: view-box; }
   #compass .needle .n { fill: #E84A2F; } #compass .needle .s { fill: rgba(243,237,228,.75); }
   #compass button { position: absolute; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
@@ -126,6 +130,7 @@
   <h1>__TITLE__, a living world</h1>
   <p id="about"></p>
   <div class="row"><label for="tod">Time of day</label><input id="tod" type="range" min="5" max="23.9" step="0.05" value="16.5"><output id="todv"></output><button id="todnow" type="button" class="now" title="Follow the time now: the world keeps your clock's time of day" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="7.2"/><path d="M10 5.6V10l3 1.9"/></svg></button></div>
+  <div class="row"><label>Season</label><div class="seasons" id="seasons"><button type="button" data-s="spring">Spring</button><button type="button" data-s="summer">Summer</button><button type="button" data-s="fall">Fall</button><button type="button" data-s="winter">Winter</button></div></div>
   <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="0" max="1" step="0.01" value="0.35"><output id="windv"></output></div>
   <div class="row"><label for="cloud">Cloud shadows</label><input id="cloud" type="range" min="0" max="0.6" step="0.01" value="0.3"><output id="cloudv"></output></div>
   <div class="row"><label for="sound">Sound</label><button id="sound" type="button" style="flex:1;font:inherit;font-size:12.5px;padding:6px 10px;border-radius:9px;cursor:pointer;color:#f3ede4;background:rgba(232,74,47,.14);border:1px solid rgba(232,74,47,.45)">Hear this place</button></div>
@@ -137,7 +142,7 @@
     <button id="goBack">Pull back</button>
   </div>
   <div id="life" hidden></div>
-  <div class="facts" id="hint">scroll to fly toward the pointer · drag to look around (the view follows the mouse) · right-drag to move the way the mouse goes (up and down to rise and sink, sideways to slide) · Shift or Ctrl + drag, or middle-drag, to orbit the spot under the pointer · the compass turns, faces north and tilts · W A S D to glide, Q E down and up, Shift for speed</div>
+  <div class="facts" id="hint">scroll to fly toward the pointer · drag to slide the land with the mouse · right-drag to turn and tilt round the spot under the pointer (or Shift or Ctrl + drag) · middle-drag to rise, sink and slide · the compass turns, faces north and tilts · W A S D to glide, Q E down and up, Shift for speed</div>
   <div class="facts" id="facts"></div>
 </div>
 <script type="module">
@@ -727,7 +732,7 @@ const DEFAULT_SPECIES = [
   { name: 'red alder and bigleaf maple', form: 'broad', leaf: '#4f7a34', clear: 0.42, width: 0.22, share: 0.12, water: 'near', maxHeight: 28, tint: [1.2, 1.25, 0.85] },
 ];
 const SPECIES = (Array.isArray(PROFILE.species) && PROFILE.species.length ? PROFILE.species : DEFAULT_SPECIES).slice(0, 6).map((s) => s.form === 'broad'
-  ? { name: s.name, broad: true, leaf: hex(s.leaf, 0x4f7a34), clear: s.clear ?? 0.42, trunk: 0.02, clumps: s.clumps ?? 36, clump: s.clump ?? 0.078, width: s.width ?? 0.22,
+  ? { name: s.name, broad: true, leaf: hex(s.summer || s.leaf, 0x4f7a34), seasons: { fall: s.fall, spring: s.spring, winter: s.winter }, evergreen: !!s.evergreen, clear: s.clear ?? 0.42, trunk: 0.02, clumps: s.clumps ?? 36, clump: s.clump ?? 0.078, width: s.width ?? 0.22,
       share: s.share ?? 0.2, water: s.water || 'any', elev: s.elev, maxHeight: s.maxHeight, tint: s.tint }
   : { name: s.name, needle: hex(s.needle, 0x29452c), tip: hex(s.tip, 0x3b6038), trunk: 0.016, clear: s.clear ?? 0.2, tiers: Math.max(14, s.tiers ?? 11), whorl: 6,
       width: s.width ?? 0.2, taper: s.taper ?? 0.9, droop: s.droop ?? 0.35, share: s.share ?? 0.3, water: s.water || 'any', elev: s.elev, maxHeight: s.maxHeight, tint: s.tint });
@@ -943,7 +948,17 @@ const TINT = SPECIES.map((s) => Array.isArray(s.tint) ? new THREE.Color(s.tint[0
 // camera a tree is its full branch structure; past it, its simple shape ──
 const NEAR = 900, FERN = 450;
 const mtx = new THREE.Matrix4(), qq = new THREE.Quaternion(), sv = new THREE.Vector3(), pv = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), cc = new THREE.Color();
-const buckets = SPECIES.map((sp, k) => {
+// SEASONS (2026-11-02, Dan: "let's work on a seasons toggle for living worlds ... model all the tree
+// color well for fall time"): the broadleaf crowns have their own material; in a season other than
+// summer it reads the leaf texture as light and shade only, so each tree can wear its season's colour
+const SEASON_U = { value: 0 };
+const broadMat = living(new THREE.MeshStandardMaterial({ map: ATLAS, alphaTest: 0.42, vertexColors: true, roughness: 0.82, metalness: 0, side: THREE.DoubleSide }), true);
+{ const before = broadMat.onBeforeCompile;
+  broadMat.onBeforeCompile = (sh) => { if (before) before(sh); sh.uniforms.uSeason = SEASON_U;
+    sh.fragmentShader = 'uniform float uSeason;\n' + sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.55, 0.15))) * 1.3, uSeason);'); };
+  broadMat.customProgramCacheKey = () => 'broadleaf-seasons'; }
+const broadDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: ATLAS, alphaTest: 0.42 });
+function makeBuckets() { return SPECIES.map((sp, k) => {
   const list = plan.filter((t) => t.sp === k);
   const mats = new Float32Array(list.length * 16), cols = new Float32Array(list.length * 3), colsFar = new Float32Array(list.length * 3);
   list.forEach((t, n) => {
@@ -955,8 +970,9 @@ const buckets = SPECIES.map((sp, k) => {
     cols.set([cc.r * 2.1, cc.g * 2.1, cc.b * 2.1], n * 3);   // the needle texture is light green; this brings it back to the ground's tone
   });
   const mk = (geo, mat, depth) => { const im = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); if (depth) im.customDepthMaterial = depth; im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, list.length) * 3), 3); im.castShadow = im.receiveShadow = true; im.frustumCulled = false; im.count = 0; scene.add(im); return im; };
-  return { list, mats, cols, colsFar, near: mk(sp.near, cardMat, cardDepth), far: mk(sp.far, impMat, impDepth) };
-});
+  return { list, mats, cols, colsFar, summer: cols.slice(), summerFar: colsFar.slice(), near: mk(sp.near, sp.broad ? broadMat : cardMat, sp.broad ? broadDepth : cardDepth), far: mk(sp.far, impMat, impDepth) };
+}); }
+let buckets = makeBuckets();
 const fernMats = new Float32Array(ferns.length * 16);
 ferns.forEach((f, n) => { qq.setFromAxisAngle(up, f.rot); mtx.compose(pv.set(f.x, f.g, -f.y), qq, sv.set(f.s, f.s, f.s)); mtx.toArray(fernMats, n * 16); });
 const fernMesh = new THREE.InstancedMesh(fernGeo, cardMat, Math.max(1, ferns.length)); fernMesh.receiveShadow = true; fernMesh.frustumCulled = false; fernMesh.count = 0; scene.add(fernMesh);
@@ -1013,7 +1029,70 @@ const buildingCount = CITY ? cityBuildings() : (() => {
 const signCount = CITY ? (indexEdges(), citySigns()) : 0;
 if (CITY) { cityScreens(); cityCrowd(); placeTagHeights(); }
 cityVehicles();
+touchPorches();
+touchWindows();
+touchGarden();
+touchLandmarks();
+touchStorefronts();
+touchTileRoofs();
 touchTrees();
+const SEASONS = ['spring', 'summer', 'fall', 'winter'], SEASON_HOOKS = [];
+const SEASON_KEY = 'living-world-season:' + DATA;
+const byDate = () => { const m = new Date().getMonth(); return m >= 2 && m <= 4 ? 'spring' : m >= 5 && m <= 7 ? 'summer' : m >= 8 && m <= 10 ? 'fall' : 'winter'; };
+let SEASON = (() => { try { const s = localStorage.getItem(SEASON_KEY); return SEASONS.includes(s) ? s : byDate(); } catch (_) { return byDate(); } })();
+// a broadleaf with no fall colour of its own turns the way its kind does: maples red and orange, oaks russet, the rest gold
+const fallOf = (name, tint) => /maple/i.test(name) ? (tint < 0.5 ? '#c4362a' : '#d9732a') : /oak/i.test(name) ? '#9a5a2a' : /cherry|plum/i.test(name) ? '#c4612f' : '#d4ad32';
+function seasonColour(sp, t, s) {
+  const own = t.own || {};
+  if (s === 'summer') return own.summer || null;
+  if (!sp.broad) return null;   // conifers keep their needles
+  if (own.evergreen ?? sp.evergreen) return s === 'spring' ? (own.spring || sp.seasons.spring || null) : (own.summer || null);
+  if (s === 'fall') return own.fall || sp.seasons.fall || fallOf(own.species || sp.name, t.tint);
+  if (s === 'winter') return own.winter || sp.seasons.winter || '#6e6157';
+  return own.spring || sp.seasons.spring || '#86b84a';
+}
+function applySeason(s) {
+  SEASON = s; const col = new THREE.Color();
+  SEASON_U.value = s === 'summer' ? 0 : 1;
+  broadMat.alphaTest = broadDepth.alphaTest = s === 'winter' ? 0.8 : 0.42;   // winter: the crowns thin to their twigs
+  buckets.forEach((b, k) => { const sp = SPECIES[k];
+    b.list.forEach((tr, n) => {
+      const c = seasonColour(sp, tr, s);
+      if (!c) { b.cols.set(b.summer.subarray(n * 3, n * 3 + 3), n * 3); b.colsFar.set(b.summerFar.subarray(n * 3, n * 3 + 3), n * 3); return; }
+      col.set(c); const v = 0.84 + tr.tint * 0.28, kN = s === 'summer' ? 2.1 : 1.45, kF = s === 'summer' ? 1.9 : 1.55;
+      b.cols.set([col.r * kN * v, col.g * kN * v, col.b * kN * v], n * 3); b.colsFar.set([col.r * kF * v, col.g * kF * v, col.b * kF * v], n * 3);
+    }); });
+  relod(true);
+  for (const f of SEASON_HOOKS) try { f(s); } catch (_) {}
+  try { localStorage.setItem(SEASON_KEY, s); } catch (_) {}
+  for (const b of document.querySelectorAll('#seasons button')) b.setAttribute('aria-pressed', String(b.dataset.s === s));
+}
+// TREES OUT OF ROOFS (2026-11-02, Dan: "the trees aren't poking out of the buildings"): a laser top standing
+// inside a building's footprint is the building, not a tree. The builder drops them when OpenStreetMap
+// answers; this holds whatever the build got, and for the buildings touches add too.
+{
+  const cell = 25, grid = new Map(), key = (i, j) => i * 100003 + j;
+  for (const b of meta.buildings || []) {
+    if (!Array.isArray(b.p) || b.p.length < 3) continue;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of b.p) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    b._bb = [x0, y0, x1, y1];
+    for (let i = Math.floor(x0 / cell); i <= Math.floor(x1 / cell); i++) for (let j = Math.floor(y0 / cell); j <= Math.floor(y1 / cell); j++) { const k = key(i, j); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(b); }
+  }
+  const inside = (p, x, y) => { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) { const [xi, yi] = p[i], [xj, yj] = p[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  let dropped = 0;
+  for (let n = plan.length - 1; n >= 0; n--) {
+    const t = plan[n]; if (t.own) continue;
+    const list = grid.get(key(Math.floor(t.x / cell), Math.floor(t.y / cell))); if (!list) continue;
+    for (const b of list) { const bb = b._bb; if (t.x < bb[0] || t.x > bb[2] || t.y < bb[1] || t.y > bb[3]) continue; if (inside(b.p, t.x, t.y)) { plan.splice(n, 1); dropped++; break; } }
+  }
+  if (dropped) console.info('trees on roofs left out:', dropped);
+}
+for (const b of buckets) { scene.remove(b.near); scene.remove(b.far); b.near.dispose(); b.far.dispose(); }
+buckets = makeBuckets();
+if (typeof rebuildGarden === 'function') SEASON_HOOKS.push(rebuildGarden);
+for (const b of document.querySelectorAll('#seasons button')) b.addEventListener('click', () => applySeason(b.dataset.s));
+applySeason(SEASON);
 touchCreatures();
 touchMaterials();
 touchRules();
@@ -2276,21 +2355,35 @@ controls.mouseButtons.LEFT = -1;
 const COMPASS = { needle: null };
 let steer = null;
 const steerOff = new THREE.Vector3(), steerAxis = new THREE.Vector3(), Y_UP = new THREE.Vector3(0, 1, 0);
+// LEFT-DRAG GRABS THE GROUND, AS GOOGLE EARTH DOES (2026-11-01, Dan: "when you left click and hold
+// you strafe"): the spot under the pointer stays under the pointer while you drag, so the land
+// slides with the mouse and the view never turns. Above the horizon, where there is no ground to
+// hold, it slides you the way the mouse goes.
+const grabPlane = new THREE.Plane(), grabHit = new THREE.Vector3(), grabNd = new THREE.Vector2(), grabRay = new THREE.Raycaster();
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey) return;
-  steer = { x: e.clientX, y: e.clientY }; try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+  const p = pivotAt(e.clientX, e.clientY);
+  steer = { x: e.clientX, y: e.clientY, at: p }; grabPlane.set(Y_UP, -p.y);
+  try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
   if (meeting) meeting.until = 0; fly = null;
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (!steer) return;
-  const dx = e.clientX - steer.x, dy = e.clientY - steer.y; steer = { x: e.clientX, y: e.clientY };
-  steerOff.subVectors(controls.target, camera.position);
-  steerOff.applyAxisAngle(Y_UP, -dx * 0.0035);   // turn the way you drag (Dan, 2026-11-01)
-  const len = steerOff.length(), pitch = Math.asin(THREE.MathUtils.clamp(steerOff.y / len, -1, 1));
-  const want = THREE.MathUtils.clamp(pitch - dy * 0.0035, -1.45, 1.45);   // drag up to look up
-  steerAxis.set(-steerOff.z, 0, steerOff.x).normalize();
-  if (steerAxis.lengthSq()) steerOff.applyAxisAngle(steerAxis, want - pitch);
-  controls.target.copy(camera.position).add(steerOff);
+  const dx = e.clientX - steer.x, dy = e.clientY - steer.y; steer.x = e.clientX; steer.y = e.clientY;
+  const r = renderer.domElement.getBoundingClientRect();
+  grabNd.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  grabRay.setFromCamera(grabNd, camera);
+  const hit = grabRay.ray.intersectPlane(grabPlane, grabHit);
+  if (hit && camera.position.distanceTo(hit) < 40000) {
+    steerOff.set(steer.at.x - hit.x, 0, steer.at.z - hit.z);
+  } else {
+    const k = 0.1 + Math.max(0, aboveGround()) * 0.005;
+    camera.getWorldDirection(flyF); flyF.y = 0; flyF.normalize(); flyR.crossVectors(flyF, camera.up).normalize();
+    steerOff.copy(flyR).multiplyScalar(-dx * k).addScaledVector(flyF, dy * k);
+  }
+  camera.position.add(steerOff); controls.target.add(steerOff);
+  const g = sampleHeight(camera.position.x, -camera.position.z) + 1.6;
+  if (camera.position.y < g) { controls.target.y += g - camera.position.y; camera.position.y = g; }
 });
 const endSteer = (e) => { if (steer && e.button === 0) { steer = null; try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {} } };
 renderer.domElement.addEventListener('pointerup', endSteer);
@@ -2299,7 +2392,8 @@ let lift = null;
 const liftBy = new THREE.Vector3();
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (e.button !== 2) return;
+  if (e.button !== 1) return;   // the middle button now (2026-11-01): right-drag orbits, as in Google Earth
+  e.preventDefault();
   lift = { x: e.clientX, y: e.clientY }; try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
   if (meeting) meeting.until = 0; fly = null;
 });
@@ -2313,7 +2407,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   const g = sampleHeight(camera.position.x, -camera.position.z) + 1.6;
   if (camera.position.y < g) { controls.target.y += g - camera.position.y; camera.position.y = g; }
 });
-const endLift = (e) => { if (lift && e.button === 2) { lift = null; try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {} } };
+const endLift = (e) => { if (lift && e.button === 1) { lift = null; try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (_) {} } };
 renderer.domElement.addEventListener('pointerup', endLift);
 renderer.domElement.addEventListener('pointercancel', () => { lift = null; });
 // ORBIT, THE WAY GOOGLE EARTH DOES IT (2026-11-01, Dan: "rotate the camera angle well, perhaps
@@ -2344,7 +2438,7 @@ function orbitBy(pivot, yaw, tilt) {   // swing the camera (and what it looks at
   if (camera.position.y < g) { const up = g - camera.position.y; camera.position.y += up; controls.target.y += up; }
 }
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (!(e.button === 1 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)))) return;
+  if (!(e.button === 2 || (e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey)))) return;   // right-drag orbits (Dan, 2026-11-01: 'right click and hold to drag it rotates')
   e.preventDefault();
   orbit = { x: e.clientX, y: e.clientY, pivot: pivotAt(e.clientX, e.clientY), button: e.button };
   try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}

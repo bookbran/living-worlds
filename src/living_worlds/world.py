@@ -48,13 +48,22 @@ def _json(url: str, body: dict | None = None, timeout: int = 90) -> Any:
         return json.loads(r.read())
 
 
-_tokens: dict[str, str] = {}
+_tokens: dict[str, tuple[str, float]] = {}
 
 
 def _sign(collection: str, href: str) -> str:
-    if collection not in _tokens:
-        _tokens[collection] = _json(PC_TOKEN.format(c=collection))["token"]
-    return href + ("&" if "?" in href else "?") + _tokens[collection]
+    # tokens expire on the clock (2026-11-02: a wider build outlived its token and every photo after
+    # it came back 403): keep each one only until five minutes before its stated expiry
+    import time
+    t = _tokens.get(collection)
+    if not t or time.time() > t[1] - 300:
+        j = _json(PC_TOKEN.format(c=collection))
+        try:
+            exp = dt.datetime.fromisoformat(str(j.get("msft:expiry", "")).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            exp = time.time() + 600
+        t = _tokens[collection] = (j["token"], exp)
+    return href + ("&" if "?" in href else "?") + t[0]
 
 
 def _search(root: str, collections: list[str], bbox: list[float], extra: dict | None = None, limit: int = 50) -> list[dict]:
@@ -497,10 +506,16 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
     cpw = 4096
     cph = int(round(cpw * (core_b[3] - core_b[1]) / (core_b[2] - core_b[0])))
     naip = _search(PC, ["naip"], core, {"sortby": [{"field": "datetime", "direction": "desc"}]}) if in_us else []
-    if naip:
-        year = naip[0]["properties"]["datetime"][:4]
+    img = None
+    # the newest NAIP year first; if its tiles refuse to download (2026-11-02: Oregon 2023 answered
+    # 403 while 2022 read fine), the year before, and so on, before falling back to Sentinel-2
+    for year in sorted({f["properties"]["datetime"][:4] for f in naip}, reverse=True):
         img = read_grid([_sign("naip", f["assets"]["image"]["href"]) for f in naip if f["properties"]["datetime"][:4] == year],
                         crs, core_b, cpw, cph, bands=(1, 2, 3, 4), resampling="lanczos", nodata=0)
+        if img is not None and img.any():
+            break
+        img = None
+    if img is not None:
         rgb, red, nir, photo = img[:3], img[0], img[3], f"NAIP {year}"
     else:
         rgb = read_grid([f["assets"]["visual"]["href"] for f in s2], crs, core_b, cpw, cph, bands=(1, 2, 3), resampling="lanczos", nodata=0)
