@@ -1,13 +1,13 @@
 # Living worlds
 
-Living worlds builds a 3D world of any real place that you can fly through, listen to and share as one file. Ask your agent for Multnomah Falls and it studies the place first (which trees grow there and where, what grows under them, which birds live there, what color the buildings are), then builds the world from public data in about four minutes.
+Living worlds builds a 3D world of any place on Earth that you can fly through, listen to and share as one file. Ask your agent for Multnomah Falls and it studies the place first (which trees grow there and where, what grows under them, which birds live there, what color the buildings are), then builds the world from public data in about four minutes.
 
 Here's what goes into a world:
 
 - **The ground and the trees.** Where the US has flown a USGS lidar survey, the world uses the laser's own ground and every treetop it saw, under a NAIP aerial photo. Everywhere else, it grows trees from the vegetation in a Sentinel-2 satellite photo and estimates their heights.
 - **The place's own forest.** The study's species grow where they grow in life, so Douglas firs stand on the slopes and bigleaf maples keep to the creek. Wind moves them, and the forest streams in around the camera all the way to the horizon.
 - **Birds with their own voices.** The birds come from GBIF's records for that spot, at their own wingspans, singing their own songs from xeno-canto recordings. Press a bird's picture to hear it and fly to one.
-- **Water and buildings.** Waterfalls get carved cliffs, falling water, mist and a roar. Rivers ripple. Buildings come from OpenStreetMap at their recorded heights, in the colors the study found.
+- **Water and buildings.** Waterfalls pour over carved cliffs into mist and roar, and rivers ripple. Buildings come from OpenStreetMap at their recorded heights, in the colors the study found.
 - **A sound mix for the place.** Falls, birds and wind in the trees, plus the traffic, trains, crowds, playgrounds and planes that OpenStreetMap shows nearby, each on its own slider.
 - **A sky that moves.** The sun casts shadows, and sliders change the time of day, the clouds and the haze.
 
@@ -40,7 +40,7 @@ The data comes from [USGS 3DEP](https://www.usgs.gov/3d-elevation-program) lidar
 
 ## Good to know
 
-- Tree shapes are always generated; their positions and heights are the data. Where a place has no lidar, the heights are estimates, and each build says so in its caveats.
+- The builder always generates the trees' shapes, and their positions and heights are the data. Where a place has no lidar, the heights are estimates, and each build says so in its caveats.
 - Some xeno-canto recordings allow only non-commercial use, and the caveats say when a world includes one.
 - A world sends place names and coordinates to the public services above and nothing else.
 
