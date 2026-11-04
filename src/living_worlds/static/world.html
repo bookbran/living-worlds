@@ -142,7 +142,7 @@
     <button id="goBack">Pull back</button>
   </div>
   <div id="life" hidden></div>
-  <div class="facts" id="hint">scroll to fly toward the pointer · drag to slide the land with the mouse · right-drag to turn and tilt round the spot under the pointer (or Shift or Ctrl + drag) · middle-drag to rise, sink and slide · the compass turns, faces north and tilts · W A S D to glide, Q E down and up, Shift for speed · controller: left stick to glide, right stick to look, triggers down and up, bumper for speed, A for views, Y for sound</div>
+  <div class="facts" id="hint">scroll to fly toward the pointer · drag to slide the land with the mouse · right-drag to turn and tilt round the spot under the pointer (or Shift or Ctrl + drag) · middle-drag to rise, sink and slide · the compass turns, faces north and tilts · W A S D to glide, Q E down and up, Shift for speed</div>
   <div class="facts" id="facts"></div>
 </div>
 <script type="module">
@@ -2352,6 +2352,7 @@ let padSeen = false, padHeld = [], padCycle = 0;
 const padV = new THREE.Vector3(), padLook = [0, 0], padD = new THREE.Vector3(), padAx = new THREE.Vector3();
 const padStick = (x, y) => { const m = Math.hypot(x, y); if (m < 0.15) return [0, 0, 0]; const k = Math.min(1, (m - 0.15) / 0.85) / m; return [x * k, y * k, 1]; };
 addEventListener('gamepadconnected', () => {
+  if (!padSeen) document.getElementById('hint').textContent += ' · controller: left stick to glide, right stick to look, triggers down and up, bumper for speed, A for views, Y for sound';
   padSeen = true;
   let t = document.getElementById('padnote');
   if (!t) { t = document.createElement('div'); t.id = 'padnote'; t.className = 'facts'; t.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100vw - 32px);margin:0;padding:6px 12px;border:0;border-radius:6px;background:rgba(20,18,16,.8);transition:opacity .6s;pointer-events:none;z-index:9'; t.textContent = 'controller connected'; document.body.appendChild(t); }
