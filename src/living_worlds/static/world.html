@@ -2348,15 +2348,19 @@ const flyF = new THREE.Vector3(), flyR = new THREE.Vector3(), flyM = new THREE.V
 // rise, right stick looks round from where you stand (not an orbit), bumper is Shift. Velocities ease
 // in and out; only live stick input cancels a fly-to, never the coasting tail. getGamepads() is not
 // touched until a pad has announced itself.
-let padSeen = false, padHeld = [], padCycle = 0;
+let padSeen = false, padHeld = [], padCycle = 0, padFlip = false;
+try { padFlip = localStorage.getItem('lw-pad-flip') === '1'; } catch (_) {}   // X flips the look's up and down (Danny, 2026-11-03), kept for next time
 const padV = new THREE.Vector3(), padLook = [0, 0], padD = new THREE.Vector3(), padAx = new THREE.Vector3();
 const padStick = (x, y) => { const m = Math.hypot(x, y); if (m < 0.15) return [0, 0, 0]; const k = Math.min(1, (m - 0.15) / 0.85) / m; return [x * k, y * k, 1]; };
-addEventListener('gamepadconnected', () => {
-  if (!padSeen) document.getElementById('hint').textContent += ' · controller: left stick to glide, right stick to look, triggers down and up, bumper for speed, A for views, Y for sound';
-  padSeen = true;
+function padNote(msg) {
   let t = document.getElementById('padnote');
-  if (!t) { t = document.createElement('div'); t.id = 'padnote'; t.className = 'facts'; t.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100vw - 32px);margin:0;padding:6px 12px;border:0;border-radius:6px;background:rgba(20,18,16,.8);transition:opacity .6s;pointer-events:none;z-index:9'; t.textContent = 'controller connected'; document.body.appendChild(t); }
+  if (!t) { t = document.createElement('div'); t.id = 'padnote'; t.className = 'facts'; t.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100vw - 32px);margin:0;padding:6px 12px;border:0;border-radius:6px;background:rgba(20,18,16,.8);transition:opacity .6s;pointer-events:none;z-index:9'; document.body.appendChild(t); }
+  t.textContent = msg;
   t.style.opacity = 1; clearTimeout(t._h); t._h = setTimeout(() => { t.style.opacity = 0; }, 3000);
+}
+addEventListener('gamepadconnected', () => {
+  if (!padSeen) document.getElementById('hint').textContent += ' · controller: left stick to glide, right stick to look, triggers down and up, bumper for speed, A for views, Y for sound, X to flip looking up and down';
+  padSeen = true; padNote('controller connected');
 });
 function padTick(dt) {
   const pad = Array.from(navigator.getGamepads()).find((g) => g && g.connected && g.mapping === 'standard');
@@ -2366,6 +2370,7 @@ function padTick(dt) {
     if (SOUND.ctx && SOUND.on && SOUND.ctx.state === 'suspended') SOUND.ctx.resume().catch(() => {});   // a pad press may not count as a gesture; harmless if refused
     if (i === 0) document.getElementById(['goClose', 'goAcross', 'goBack'][padCycle++ % 3]).click();
     if (i === 3) document.getElementById('sound').click();
+    if (i === 2) { padFlip = !padFlip; try { localStorage.setItem('lw-pad-flip', padFlip ? '1' : '0'); } catch (_) {} padNote(padFlip ? 'look flipped: stick up looks down' : 'look normal: stick up looks up'); }
   } });
   padHeld = now;
   const [lx, ly, la] = padStick(pad.axes[0], pad.axes[1]), [rx, ry, ra] = padStick(pad.axes[2], pad.axes[3]);
@@ -2380,7 +2385,7 @@ function padTick(dt) {
   padV.addScaledVector(padAx.subVectors(padD, padV), ease);
   if (!live && padV.lengthSq() < 1e-4) padV.set(0, 0, 0);
   flyM.addScaledVector(padV, dt);
-  padLook[0] += (-rx * 1.8 - padLook[0]) * ease; padLook[1] += (-ry * 1.8 - padLook[1]) * ease;
+  padLook[0] += (-rx * 1.8 - padLook[0]) * ease; padLook[1] += ((padFlip ? ry : -ry) * 1.8 - padLook[1]) * ease;
   if (Math.abs(padLook[0]) + Math.abs(padLook[1]) < 1e-4) return;
   padD.subVectors(controls.target, camera.position);
   const el = Math.asin(THREE.MathUtils.clamp(padD.y / (padD.length() || 1), -1, 1)), lim = 85 * Math.PI / 180;
