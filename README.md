@@ -23,6 +23,8 @@ Each world is one self-contained HTML file of 15 to 30 MB. It opens in any brows
 
 The server also runs a gallery at http://127.0.0.1:27530 that shows every map, timelapse and living world on your computer, newest first, with a thumbnail for each. It reads the same folder Groundstation writes to (`GROUNDSTATION_OUT`), so Groundstation's maps and your worlds appear together.
 
+To stop or start it, ask your agent to turn the gallery off or on. The setting covers every chat on the computer and lasts across restarts, and the gallery stops or returns within about 5 seconds.
+
 ## Install
 
 Living worlds runs on [uv](https://docs.astral.sh/uv/). In Claude Code:

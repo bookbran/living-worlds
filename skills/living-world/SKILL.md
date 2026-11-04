@@ -29,7 +29,7 @@ The shape is in `render_world`'s description; `examples/multnomah-falls.profile.
 
 ## 4. Show it
 
-The world is one HTML file of 15 to 30 MB that opens in any browser with no server. It also appears in the Maps gallery at http://127.0.0.1:27530, beside every Groundstation map on the computer.
+The world is one HTML file of 15 to 30 MB that opens in any browser with no server. It also appears in the Maps gallery at http://127.0.0.1:27530, beside every Groundstation map on the computer. If the member asks to stop or start the gallery, call `gallery(on=false)` or `gallery(on=true)`.
 
 Reply with a short table of what it is made of and what the study found, then what to try: the three view buttons, time of day, wind, clouds, "Hear this place" for the sound mix, and pressing any bird's picture to hear it and fly to one.
 
