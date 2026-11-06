@@ -9,7 +9,7 @@
     {
       "name": "living-worlds",
       "source": "./",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "A render_world MCP tool that builds a 3D world of any place (lidar ground and trees where the US has flown a survey, the place's own species, birds with their own voices, buildings, waterfalls, a sound mix) as one HTML file, a living-world skill that studies the place first, and the Maps gallery. Requires uv (https://docs.astral.sh/uv/). Pairs with the groundstation plugin.",
       "author": {
         "name": "Dan Hahn",

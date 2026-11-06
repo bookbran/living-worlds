@@ -1,6 +1,6 @@
 [project]
 name = "living-worlds"
-version = "0.2.0"
+version = "0.2.1"
 description = "Walk-in 3D worlds of real places, built from open Earth data: lidar ground and trees, the place's own species and birds, buildings, water and sound, as one HTML file. A companion to Groundstation."
 requires-python = ">=3.12,<3.15"
 license = "MIT"
