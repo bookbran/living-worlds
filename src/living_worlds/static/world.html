@@ -2344,6 +2344,57 @@ addEventListener('keydown', (e) => { if (e.target.closest && e.target.closest('i
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 addEventListener('blur', () => keys.clear());
 const flyF = new THREE.Vector3(), flyR = new THREE.Vector3(), flyM = new THREE.Vector3();
+// GAMEPAD (2026-11-03, Danny: smoother ways to move around): left stick glides, triggers sink and
+// rise, right stick looks round from where you stand (not an orbit), bumper is Shift. Velocities ease
+// in and out; only live stick input cancels a fly-to, never the coasting tail. getGamepads() is not
+// touched until a pad has announced itself.
+let padSeen = false, padHeld = [], padCycle = 0, padFlip = false;
+try { padFlip = localStorage.getItem('lw-pad-flip') === '1'; } catch (_) {}   // X flips the look's up and down (Danny, 2026-11-03), kept for next time
+const padV = new THREE.Vector3(), padLook = [0, 0], padD = new THREE.Vector3(), padAx = new THREE.Vector3();
+const padStick = (x, y) => { const m = Math.hypot(x, y); if (m < 0.15) return [0, 0, 0]; const k = Math.min(1, (m - 0.15) / 0.85) / m; return [x * k, y * k, 1]; };
+function padNote(msg) {
+  let t = document.getElementById('padnote');
+  if (!t) { t = document.createElement('div'); t.id = 'padnote'; t.className = 'facts'; t.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:calc(100vw - 32px);margin:0;padding:6px 12px;border:0;border-radius:6px;background:rgba(20,18,16,.8);transition:opacity .6s;pointer-events:none;z-index:9'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.style.opacity = 1; clearTimeout(t._h); t._h = setTimeout(() => { t.style.opacity = 0; }, 3000);
+}
+addEventListener('gamepadconnected', () => {
+  if (!padSeen) document.getElementById('hint').textContent += ' · controller: left stick to glide, right stick to look, triggers down and up, bumper for speed, A for views, Y for sound, X to flip looking up and down';
+  padSeen = true; padNote('controller connected');
+});
+function padTick(dt) {
+  const pad = Array.from(navigator.getGamepads()).find((g) => g && g.connected && g.mapping === 'standard');
+  if (!pad) { padV.set(0, 0, 0); padLook[0] = padLook[1] = 0; padHeld = []; return; }
+  const b = pad.buttons, now = b.map((x) => x.pressed);
+  now.forEach((on, i) => { if (on && !padHeld[i]) {
+    if (SOUND.ctx && SOUND.on && SOUND.ctx.state === 'suspended') SOUND.ctx.resume().catch(() => {});   // a pad press may not count as a gesture; harmless if refused
+    if (i === 0) document.getElementById(['goClose', 'goAcross', 'goBack'][padCycle++ % 3]).click();
+    if (i === 3) document.getElementById('sound').click();
+    if (i === 2) { padFlip = !padFlip; try { localStorage.setItem('lw-pad-flip', padFlip ? '1' : '0'); } catch (_) {} padNote(padFlip ? 'look flipped: stick up looks down' : 'look normal: stick up looks up'); }
+  } });
+  padHeld = now;
+  const [lx, ly, la] = padStick(pad.axes[0], pad.axes[1]), [rx, ry, ra] = padStick(pad.axes[2], pad.axes[3]);
+  const lift = (b[7] ? b[7].value : 0) - (b[6] ? b[6].value : 0);
+  const live = la || ra || Math.abs(lift) > 0.05;
+  if (live) { if (meeting) meeting.until = 0; fly = null; }
+  const ease = 1 - Math.exp(-dt * 6);
+  camera.getWorldDirection(flyF); flyF.y = 0; flyF.normalize(); flyR.crossVectors(flyF, camera.up).normalize();
+  padD.set(0, 0, 0).addScaledVector(flyF, -ly).addScaledVector(flyR, lx); padD.y = Math.abs(lift) > 0.05 ? lift : 0;
+  if (padD.length() > 1) padD.normalize();
+  padD.multiplyScalar(Math.min(3000, 12 + Math.max(0, aboveGround()) * 0.9) * (b[4]?.pressed || b[5]?.pressed ? 4 : 1));
+  padV.addScaledVector(padAx.subVectors(padD, padV), ease);
+  if (!live && padV.lengthSq() < 1e-4) padV.set(0, 0, 0);
+  flyM.addScaledVector(padV, dt);
+  padLook[0] += (-rx * 1.8 - padLook[0]) * ease; padLook[1] += ((padFlip ? ry : -ry) * 1.8 - padLook[1]) * ease;
+  if (Math.abs(padLook[0]) + Math.abs(padLook[1]) < 1e-4) return;
+  padD.subVectors(controls.target, camera.position);
+  const el = Math.asin(THREE.MathUtils.clamp(padD.y / (padD.length() || 1), -1, 1)), lim = 85 * Math.PI / 180;
+  const dp = THREE.MathUtils.clamp(el + padLook[1] * dt, -lim, lim) - el;
+  padD.applyAxisAngle(camera.up, padLook[0] * dt);
+  padAx.crossVectors(padD, camera.up).normalize();
+  padD.applyAxisAngle(padAx, dp);
+  controls.target.copy(camera.position).add(padD);
+}
 // RIGHT-DRAG (2026-10-31, "hold the right mouse button down ... raises and lowers
 // elevation"): up and down lifts and lowers you, sideways slides you left and right;
 // how far follows your height above the ground. Replaces the orbit's right-button pan.
@@ -2488,6 +2539,7 @@ function flyAround(dt) {
     flyM.y += k('e', 'pageup') - k('q', 'pagedown');
     if (flyM.lengthSq()) { if (meeting) meeting.until = 0; fly = null; flyM.normalize().multiplyScalar(Math.min(3000, 12 + Math.max(0, aboveGround()) * 0.9) * (keys.has('shift') ? 4 : 1) * dt); }
   }
+  if (padSeen) padTick(dt);
   if (flyQueue.lengthSq() > 1e-4) { const take = flyQueue.clone().multiplyScalar(1 - Math.exp(-dt * 7)); flyQueue.sub(take); flyM.add(take); }
   if (!flyM.lengthSq()) return;
   camera.position.add(flyM); controls.target.add(flyM);
