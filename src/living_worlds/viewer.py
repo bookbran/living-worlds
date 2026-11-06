@@ -186,20 +186,43 @@ def serve(port: int = PORT) -> ThreadingHTTPServer:
     return httpd
 
 
+def gallery_on() -> bool:
+    return not (Path.home() / ".living-worlds" / "gallery-off").exists()
+
+
+def set_gallery(on: bool) -> None:
+    marker = Path.home() / ".living-worlds" / "gallery-off"
+    if on:
+        marker.unlink(missing_ok=True)
+    else:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+
+
 def serve_in_background(port: int = PORT) -> None:
-    """Keep the gallery answering from this process whenever the port is free.
+    """Keep the gallery answering from this process whenever it is on and the port is free.
 
     ponytail: one gallery per computer, claimed by whichever living-worlds
-    process binds first; the rest retry every 30 s so it comes back when that
-    chat closes. Upgrade path: a single always-on service, if members ask for
-    the gallery with no chat open.
+    process binds first. Every process checks ~/.living-worlds/gallery-off each
+    5 s: marker present, it lets go of the port and does not bind; marker gone,
+    whichever binds first serves again. So off (and on) takes up to 5 s, and the
+    marker is the whole state. Upgrade path: a single always-on service, if
+    members ask for the gallery with no chat open.
     """
     def run():
+        httpd = None
         while True:
-            try:
-                serve(port).serve_forever()
-            except OSError:
-                time.sleep(30)
+            if httpd and not gallery_on():
+                httpd.shutdown()
+                httpd.server_close()
+                httpd = None
+            elif not httpd and gallery_on():
+                try:
+                    httpd = serve(port)
+                    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+                except OSError:
+                    httpd = None
+            time.sleep(5)
 
     threading.Thread(target=run, name="living-worlds-maps", daemon=True).start()
 

@@ -19,6 +19,9 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from living_worlds import viewer
+
+GALLERY_URL = "http://127.0.0.1:27530"
 mcp = FastMCP("living-worlds")
 
 
@@ -124,15 +127,23 @@ def render_world(
         "birds": [f"{b['name']} ({b['kind']}, {b['wingspan']} m{', ' + b['sound']['type'] if b.get('sound') else ''})" for b in m["birds"]],
         "species": [s["name"] for s in (profile or {}).get("species", [])] or "default", "caveats": w["caveats"],
         "size_mb": round(Path(path).stat().st_size / 1e6, 1),
-        "gallery": "http://127.0.0.1:27530",
+        "gallery": GALLERY_URL if viewer.gallery_on() else "The gallery is off; gallery(on=true) brings it back.",
     }
+
+
+@mcp.tool()
+def gallery(on: bool) -> dict[str, str]:
+    """Turn the Maps gallery on or off for the whole computer, every chat. Off stays
+    off until turned on, also across restarts. When off, it stops within about 5 s."""
+    viewer.set_gallery(on)
+    return {"gallery": "on" if on else "off", "url": GALLERY_URL,
+            "note": "The gallery is on and answers within 5 seconds." if on
+            else "The gallery is off in every chat and stays off until you turn it on."}
 
 
 def main() -> None:
     # the Maps gallery answers from whichever chat binds the port first
     if os.environ.get("LIVING_WORLDS_GALLERY", os.environ.get("GROUNDSTATION_MAPS", "1")) != "0":
-        from living_worlds import viewer
-
         viewer.serve_in_background()
     mcp._mcp_server.version = version("living-worlds")
     mcp.run()

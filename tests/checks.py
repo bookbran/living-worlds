@@ -40,6 +40,22 @@ def t_world_html_embeds_every_block():
     assert "__TITLE__" not in page and page.index('id="w-meta"') < page.index('<script type="module">')
 
 
+def t_gallery_switch_round_trip():
+    import os
+
+    from living_worlds import viewer
+
+    old, os.environ["HOME"] = os.environ.get("HOME"), tempfile.mkdtemp()
+    try:
+        assert viewer.gallery_on()
+        viewer.set_gallery(False)
+        assert not viewer.gallery_on()
+        viewer.set_gallery(True)
+        assert viewer.gallery_on()
+    finally:
+        os.environ["HOME"] = old
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("t_"):
