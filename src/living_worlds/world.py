@@ -27,6 +27,7 @@ import json
 import math
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -37,6 +38,8 @@ import numpy as np
 PC = "https://planetarycomputer.microsoft.com/api/stac/v1"
 PC_TOKEN = "https://planetarycomputer.microsoft.com/api/sas/v1/token/{c}"
 ES = "https://earth-search.aws.element84.com/v1"
+TNM = "https://tnmaccess.nationalmap.gov/api/v1/products"
+OVERPASS_RETRY_S = 20
 UA = {"User-Agent": "living-worlds/0.1 (github.com/bookbran/living-worlds)"}
 TEMPLATE = Path(__file__).parent / "static" / "world.html"
 
@@ -155,17 +158,99 @@ def _landmarks(bbox: list[float], name: str, lon: float, lat: float) -> list[dic
     return out
 
 
-def _buildings(core: list[float], crs: str, cx: float, cy: float, cap: int = 6000) -> list[dict]:
+def _tnm_dem(core: list[float], dataset: str) -> list[str]:
+    """GeoTIFF urls of a National Map elevation dataset over the box, newest project per tile."""
+    r = _json(TNM + "?" + urllib.parse.urlencode({"datasets": dataset, "bbox": ",".join(str(v) for v in core),
+                                                    "prodFormats": "GeoTIFF", "max": 50}))
+    items = [i for i in r.get("items", []) if str(i.get("downloadURL", "")).endswith(".tif")]
+    items.sort(key=lambda i: i.get("publicationDate") or i.get("dateCreated") or "", reverse=True)
+    seen, out = set(), []
+    for i in items:
+        b = i.get("boundingBox") or {}
+        key = tuple(round(b.get(k, 0), 2) for k in ("minX", "minY", "maxX", "maxY"))
+        if key not in seen:   # the same tile is listed once per project that flew it
+            seen.add(key)
+            out.append(i["downloadURL"])
+    return out
+
+
+GROUND_SOURCES = [("lidar", "USGS 3DEP lidar", None), ("1m", "USGS 3DEP 1 m DEM", "Digital Elevation Model (DEM) 1 meter"),
+                  ("10m", "USGS 3DEP 1/3 arc-second DEM", "National Elevation Dataset (NED) 1/3 arc-second Current")]
+COPERNICUS = "Copernicus DEM 30 m"
+
+WANT_KEYS = {"ground": ("auto", "lidar", "1m", "10m", "30m"), "buildings": ("auto", "none")}
+
+
+def _check_want(want):
+    for k, v in (want or {}).items():
+        if k not in WANT_KEYS or v not in WANT_KEYS[k]:
+            allowed = "; ".join(f"{a}: {', '.join(vs)}" for a, vs in WANT_KEYS.items())
+            raise ValueError(f"unknown want {k}={v!r}; allowed {allowed}")
+
+
+def _fine_ground(core, crs, core_b, gw, gh, in_us, want, steps):
+    """Finer ground than the 30 m terrain: sources tried in order, each filling the gaps the last
+    left, each recorded in steps. Returns (grid or None, label, lidar items, lidar cell mask)."""
+    pick = (want or {}).get("ground", "auto")
+    grid, used, lidar_items = None, [], []
+    lidar_mask = np.zeros((gh, gw), bool)
+    if not in_us:
+        steps.append({"layer": "ground", "source": "USGS 3DEP (lidar, 1 m, 1/3 arc-second)",
+                      "found": "outside the US, not searched", "used": False})
+    for key, label, dataset in GROUND_SOURCES:
+        if not in_us or pick not in ("auto", key):
+            continue
+        if grid is not None and np.isfinite(grid).mean() >= 0.9:
+            break
+        step = {"layer": "ground", "source": label, "found": "", "used": False}
+        steps.append(step)
+        items: list[dict] = []
+        try:
+            if dataset is None:
+                items = _search(PC, ["3dep-lidar-dtm"], core)
+                hrefs = [_sign("3dep-lidar-dtm", f["assets"]["data"]["href"]) for f in items]
+            else:
+                hrefs = _tnm_dem(core, dataset)
+        except Exception as e:
+            step.update(found="unreachable", note=f"unreachable ({type(e).__name__})")
+            continue
+        if not hrefs:
+            step["found"] = "none here"
+            continue
+        g = read_grid(hrefs, crs, core_b, gw, gh)
+        share = float(np.isfinite(g).mean()) if g is not None else 0.0
+        if share == 0:
+            step["found"] = f"{len(hrefs)} tiles, none readable"
+            continue
+        step.update(found=f"{len(hrefs)} tiles, {share * 100:.0f}% of the core", used=True)
+        if key == "lidar":
+            lidar_items, lidar_mask = items, np.isfinite(g)
+        grid = g if grid is None else np.where(np.isnan(grid), g, grid)
+        used.append(label)
+    return grid, (", gaps from ".join(used) or COPERNICUS), lidar_items, lidar_mask
+
+
+def _buildings(core: list[float], crs: str, cx: float, cy: float, cap: int = 6000) -> tuple[list[dict], str | None]:
     """Every building OpenStreetMap has in the core: footprint in local metres, height from
     its height tag, else its storeys at 3.2 m, else 6 m."""
     from rasterio.warp import transform as warp_xy
 
     s, w, n, e = core[1], core[0], core[3], core[2]
     q = f'[out:json][timeout:170][maxsize:536870912];way["building"]({s},{w},{n},{e});out geom;'
-    try:
-        els = _json("https://overpass-api.de/api/interpreter?" + urllib.parse.urlencode({"data": q}), timeout=200).get("elements", [])
-    except Exception:
-        return []
+    els, err = None, None
+    for attempt in (0, 1):
+        try:
+            r = _json("https://overpass-api.de/api/interpreter?" + urllib.parse.urlencode({"data": q}), timeout=200)
+            if not r.get("elements") and r.get("remark"):   # HTTP 200 carrying a timeout or out-of-memory remark
+                raise RuntimeError(str(r["remark"])[:80])
+            els = r.get("elements", [])
+            break
+        except Exception as exc:   # not `e`: the except clause would delete the bbox east edge
+            err = exc
+            if attempt == 0:
+                time.sleep(OVERPASS_RETRY_S)
+    if els is None:
+        return [], f"OpenStreetMap's Overpass server did not answer twice ({type(err).__name__})"
     # a dense city has far more than the cap: keep the ones nearest the middle, not the first returned
     mx, my = (w + e) / 2, (s + n) / 2
     els.sort(key=lambda el: ((el.get("geometry") or [{"lon": mx, "lat": my}])[0]["lon"] - mx) ** 2 + ((el.get("geometry") or [{"lon": mx, "lat": my}])[0]["lat"] - my) ** 2)
@@ -181,7 +266,7 @@ def _buildings(core: list[float], crs: str, cx: float, cy: float, cap: int = 600
             hgt = 6.0
         xs, ys = warp_xy("EPSG:4326", crs, [q_["lon"] for q_ in g], [q_["lat"] for q_ in g])
         out.append({"id": f"osm:way/{el.get('id')}", "p": [[round(x - cx, 1), round(y - cy, 1)] for x, y in zip(xs, ys)][:-1], "h": round(min(hgt, 400), 1), "k": t.get("building", "yes")})
-    return out
+    return out, None
 
 
 def _soundscape(core, crs, cx, cy):
@@ -438,7 +523,7 @@ def _best_sentinel(far: list[float]) -> tuple[str, list[dict], float, bool]:
 
 def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str | None = None,
                 profile: dict | None = None, at: tuple[float, float] | None = None,
-                touches_dir: str | None = None) -> dict[str, Any]:
+                touches_dir: str | None = None, want: dict | None = None) -> dict[str, Any]:
     """Gather and shape every layer of a world; returns the page's embedded blocks and its record.
 
     A profile with "setting": "city" builds a tight frame round the place with the city
@@ -446,7 +531,10 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
     Tokyo), a sharp aerial photo where one is published (GSI in Japan), trees only where
     the city has them, shop signs, crossings, platforms, places to visit and recordings.
     touches_dir holds the community's touches (touches.py, one folder per touch under
-    <touches_dir>/<world slug>/), laid on at every build."""
+    <touches_dir>/<world slug>/), laid on at every build.
+    want steers the build: ground (auto, lidar, 1m, 10m, 30m) and buildings (auto, none).
+    Every layer's attempt is recorded in meta["steps"]."""
+    _check_want(want)
     from rasterio.warp import transform as warp_xy, transform_bounds
     import tempfile
     from . import city as citylayer, touches as touchlayer
@@ -470,6 +558,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
     local_xy = lambda lons, lats: [[round(x - cx, 1), round(y - cy, 1)] for x, y in zip(*warp_xy("EPSG:4326", crs, lons, lats))]
     in_us = 15 < lat < 72 and -170 < lon < -60
     blocks: dict[str, str] = {}
+    steps: list[dict] = []
 
     # far: Copernicus terrain, Sentinel-2 true colour
     dems = [f["assets"]["data"]["href"] for f in _search(ES, ["cop-dem-glo-30"], far)]
@@ -480,6 +569,8 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         raise ValueError("no terrain could be read for this place")
     far_h = np.nan_to_num(far_h, nan=float(np.nanmin(far_h))).astype(np.float32)
     s2_day, s2, s2_cloud, s2_covers = _best_sentinel(far)
+    steps.append({"layer": "far photo", "source": "Sentinel-2", "used": True,
+                  "found": f"{s2_day}, {s2_cloud:.0f}% cloud, " + ("covers the far box" if s2_covers else "does not cover the far box")})
     pw = 4096
     ph = int(round(pw * (far_b[3] - far_b[1]) / (far_b[2] - far_b[0])))
     blocks["far_photo"] = jpeg_b64(read_grid([f["assets"]["visual"]["href"] for f in s2], crs, far_b, pw, ph, bands=(1, 2, 3), nodata=0))
@@ -489,16 +580,19 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
     cell = 3.0
     gw, gh = int(round((core_b[2] - core_b[0]) / cell)), int(round((core_b[3] - core_b[1]) / cell))
     fill = read_grid(dems, crs, core_b, gw, gh, nodata=-32767)
-    dtm = _search(PC, ["3dep-lidar-dtm"], core) if in_us else []
-    ground = read_grid([_sign("3dep-lidar-dtm", f["assets"]["data"]["href"]) for f in dtm], crs, core_b, gw, gh) if dtm else None
+    fine, glabel, dtm, lidar_mask = _fine_ground(core, crs, core_b, gw, gh, in_us, want, steps)
     hag_items = _search(PC, ["3dep-lidar-hag"], core) if dtm else []
     hag = read_grid([_sign("3dep-lidar-hag", f["assets"]["data"]["href"]) for f in hag_items], crs, core_b, gw, gh) if hag_items else None
-    lidar = np.isfinite(ground) if ground is not None else np.zeros((gh, gw), bool)
-    if ground is not None:
-        lidar &= ~(np.isfinite(fill) & (np.abs(ground - fill) > 120))
-        ground = np.where(lidar, ground, fill)
+    if fine is not None:
+        sane = ~(np.isfinite(fill) & (np.abs(fine - fill) > 120))
+        fine_mask = np.isfinite(fine) & sane
+        lidar = lidar_mask & sane
+        ground = np.where(fine_mask, fine, fill)
     else:
+        fine_mask = lidar = np.zeros((gh, gw), bool)
         ground = fill
+    if float(fine_mask.mean()) < 0.9:
+        steps.append({"layer": "ground", "source": COPERNICUS, "found": "fills the rest" if fine_mask.any() else "whole core", "used": True})
     ground = despike(np.nan_to_num(ground, nan=float(np.nanmin(fill))).astype(np.float32))
     blocks["core_heights"] = base64.b64encode(ground.tobytes()).decode()
 
@@ -517,11 +611,13 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         img = None
     if img is not None:
         rgb, red, nir, photo = img[:3], img[0], img[3], f"NAIP {year}"
+        steps.append({"layer": "core photo", "source": "NAIP", "found": year, "used": True})
     else:
         rgb = read_grid([f["assets"]["visual"]["href"] for f in s2], crs, core_b, cpw, cph, bands=(1, 2, 3), resampling="lanczos", nodata=0)
         red = read_grid([f["assets"]["red"]["href"] for f in s2], crs, core_b, cpw, cph, nodata=0)
         nir = read_grid([f["assets"]["nir"]["href"] for f in s2], crs, core_b, cpw, cph, nodata=0)
         photo = f"Sentinel-2 {s2_day}"
+        steps.append({"layer": "core photo", "source": "Sentinel-2", "found": "no NAIP here, fell back to Sentinel-2 " + s2_day, "used": True})
     sharp = citylayer.gsi_photo(core_b, crs, cpw, cph) if CITY else None
     if sharp is not None:
         rgb, photo = sharp, "GSI seamless aerial photo (Geospatial Information Authority of Japan)"
@@ -571,8 +667,18 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
             buildings = [b for b in buildings if (ext[0] < b["c"][0] < ext[2] and ext[1] < b["c"][1] < ext[3]) or b["h"] >= 45]
         if buildings:
             citylayer.attach_names(buildings, city_osm.get("named", []))
-    if not buildings:
-        buildings = _buildings(core, crs, cx, cy)
+    bnote = None
+    if (want or {}).get("buildings") == "none":
+        buildings = []
+        steps.append({"layer": "buildings", "source": "OpenStreetMap", "found": "skipped on request", "used": False})
+    elif buildings:
+        steps.append({"layer": "buildings", "source": "PLATEAU", "found": f"{len(buildings)} buildings", "used": True})
+    else:
+        buildings, bnote = _buildings(core, crs, cx, cy)
+        step = {"layer": "buildings", "source": "OpenStreetMap", "found": f"{len(buildings)} buildings", "used": bool(buildings)}
+        if bnote:
+            step.update(found="no answer", note=bnote)
+        steps.append(step)
     if CITY and sharp is not None:   # every crown the sharp photo sees on the streets, off the roofs
         seen = citylayer.photo_trees(rgb, core_b, cx, cy, cell, ground, [b for b in buildings if "p" in b], estimated[:, :2].tolist(), rng)
         estimated = np.concatenate([estimated, seen])
@@ -607,7 +713,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         "core": {"extent": rel(core_b), "grid": [gw, gh], "photo": [cpw, cph], "lidar_share": round(float(lidar.mean()), 3)},
         "far": {"extent": rel(far_b), "grid": [fw, fh], "photo": [pw, ph]},
         "trees": {"measured": int(len(measured)), "estimated": int(len(estimated)), "tallest_m": round(float(trees[:, 3].max()), 1) if len(trees) else 0},
-        "sources": {"ground": "USGS 3DEP lidar" if lidar.any() else "Copernicus DEM 30 m", "core_photo": photo,
+        "sources": {"ground": glabel if fine_mask.any() else COPERNICUS, "core_photo": photo,
                     "far_photo": f"Sentinel-2 {s2_day}", "terrain": "Copernicus DEM GLO-30"},
         "landmarks": marks, "buildings": buildings, "features": features, "sounds": sounds, "birds": birds, "portraits": portraits, "profile": profile or None,
         "setting": "city" if CITY else "land",
@@ -628,10 +734,14 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
             relp = os.path.relpath(full, files).replace(os.sep, "/").lower()
             blocks["f-" + re.sub(r"[^a-z0-9]+", "-", relp)] = base64.b64encode(open(full, "rb").read()).decode()
     caveats = []
-    if not lidar.any():
-        caveats.append("no lidar here: the ground is 30 m terrain and every tree is placed from the photo's vegetation with an estimated height")
-    elif lidar.mean() < 0.9:
+    if not fine_mask.any():
+        caveats.append("no fine terrain here: the ground is 30 m terrain and every tree is placed from the photo's vegetation with an estimated height")
+    elif lidar.any() and lidar.mean() < 0.9:
         caveats.append(f"lidar covers {lidar.mean() * 100:.0f}% of the core; trees elsewhere are placed from the photo with estimated heights")
+    elif not lidar.any():
+        caveats.append(f"the ground is {glabel}, which carries no tree heights: every tree is placed from the photo's vegetation with an estimated height")
+    if bnote:
+        caveats.append(f"{bnote}; this world has no buildings. Build it again later for them.")
     if not naip:
         caveats.append(f"the core photo is Sentinel-2 at 10 m, not an aerial photo; up close the ground is soft")
     if not s2_covers:
@@ -642,6 +752,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
     if any("-nc" in b["sound"]["credit"]["license"] for b in voiced):
         caveats.append("some bird recordings are licensed non-commercial (xeno-canto, CC BY-NC); they are credited in the page and fine to share, not to sell")
     caveats.append("trees are generated from recipes and rules (species by distance to water, wind, variety); their positions and heights are data, their shapes are not")
+    meta["steps"], meta["caveats"] = steps, caveats
     return {"meta": meta, "blocks": blocks, "caveats": caveats, "found": found, "sentinel": {"day": s2_day, "cloud_pct": round(s2_cloud, 2)}}
 
 

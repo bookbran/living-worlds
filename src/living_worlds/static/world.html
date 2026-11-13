@@ -32,6 +32,8 @@
     color: #f3ede4; background: rgba(232,74,47,.14); border: 1px solid rgba(232,74,47,.45); }
   .btns button:hover { background: rgba(232,74,47,.3); }
   .facts { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.12); font: 11px/1.5 "Roboto Mono", Consolas, monospace; color: rgba(243,237,228,.6); }
+  #built summary { cursor: pointer; }
+  #built .step { margin-top: 4px; } #built .caveats { margin: 8px 0 0; padding-left: 16px; } #built .keep { margin-top: 8px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
   #life { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; gap: 10px; }
   #life .set { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
   #life .set > b { flex: none; width: 100%; font: 600 10.5px "Roboto Condensed", Bahnschrift, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: rgba(243,237,228,.62); }
@@ -144,6 +146,7 @@
   <div id="life" hidden></div>
   <div class="facts" id="hint">scroll to fly toward the pointer · drag to slide the land with the mouse · right-drag to turn and tilt round the spot under the pointer (or Shift or Ctrl + drag) · middle-drag to rise, sink and slide · the compass turns, faces north and tilts · W A S D to glide, Q E down and up, Shift for speed</div>
   <div class="facts" id="facts"></div>
+  <details class="facts" id="built"><summary>How this world was built</summary><div id="built-body"></div></details>
 </div>
 <script type="module">
 import * as THREE from 'three';
@@ -156,6 +159,17 @@ const DATA = './__WORLD__/';
 // blocks, so the one file opens anywhere with no server (Groundstation's way)
 const inside = (id) => { const el = document.getElementById('w-' + id); return el ? el.textContent.trim() : null; };
 const meta = inside('meta') ? JSON.parse(inside('meta')) : await (await fetch(DATA + 'world.json')).json();
+{
+  const built = document.getElementById('built');
+  if (!Array.isArray(meta.steps)) built.hidden = true;
+  else {
+    const e = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const cav = Array.isArray(meta.caveats) ? meta.caveats : [];
+    document.getElementById('built-body').innerHTML =
+      meta.steps.map((s) => '<div class="step">' + (s.used ? '✓' : '·') + ' ' + e(s.layer) + ': ' + e(s.source) + ', ' + e(s.found) + (s.note ? ' (' + e(s.note) + ')' : '') + '</div>').join('') +
+      (cav.length ? '<div class="keep">Keep in mind</div><ul class="caveats">' + cav.map((c) => '<li>' + e(c) + '</li>').join('') + '</ul>' : '');
+  }
+}
 const f32 = async (n) => {
   const e = inside(n.replace('.bin', ''));
   if (!e) return new Float32Array(await (await fetch(DATA + n)).arrayBuffer());
