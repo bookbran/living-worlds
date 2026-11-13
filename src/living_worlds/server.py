@@ -58,6 +58,7 @@ def render_world(
     profile: dict[str, Any] | None = None,
     at: list[float] | None = None,
     touches_dir: str | None = None,
+    want: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build a living world: an open-world 3D scene of a place, as one HTML file.
 
@@ -107,21 +108,25 @@ def render_world(
     <touches_dir>/<world slug>/ (see touches.py for the format and the budget); each
     is laid on at every build, credited by name, or reported as waiting or turned away.
 
-    Returns {path, title, place, core, trees, sources, landmarks, caveats}. Read
+    want: steer the build, ground = auto, lidar, 1m, 10m or 30m (a named one tries
+    only that source, then the 30 m terrain); buildings = auto or none.
+
+    Returns {path, title, place, core, trees, sources, steps, landmarks, caveats};
+    steps lists each source tried and whether it was used. Read
     the caveats: where there is no lidar, tree heights are estimates, and tree
     shapes are always generated (their positions and heights are the data).
     """
     from living_worlds import world as _world
 
     w = _world.build_world(place, radius_km=radius_km, core_km=core_km, name=title, profile=profile,
-                           at=tuple(at) if at else None, touches_dir=touches_dir)
+                           at=tuple(at) if at else None, touches_dir=touches_dir, want=want)
     path = _artifact_path(out_path, w["meta"]["name"])
     _world.write_world_html(w, path)
     m = w["meta"]
     return {
         "path": path, "title": m["name"], "place": w["found"],
         "core": {"km": core_km, "lidar_share": m["core"]["lidar_share"], "photo": m["sources"]["core_photo"]},
-        "trees": m["trees"], "sources": m["sources"], "sentinel": w["sentinel"],
+        "trees": m["trees"], "sources": m["sources"], "steps": m["steps"], "sentinel": w["sentinel"],
         "landmarks": [l["name"] for l in m["landmarks"]], "buildings": len(m["buildings"]),
         "set_pieces": [f"{f['name']} ({f['kind']})" for f in m["features"]],
         "birds": [f"{b['name']} ({b['kind']}, {b['wingspan']} m{', ' + b['sound']['type'] if b.get('sound') else ''})" for b in m["birds"]],
