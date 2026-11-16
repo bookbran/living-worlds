@@ -2,7 +2,7 @@
 
 Register with Claude Code (the plugin does this for you):
 
-    claude mcp add living-worlds -- uv --directory /path/to/living-worlds run living-worlds
+    claude mcp add living-worlds -- uv --project /path/to/living-worlds run living-worlds
 
 It sits beside Groundstation (github.com/dannybauman/groundstation), which keeps
 the Earth data tools: search, previews, maps, timelapses, events, weather. This

@@ -36,7 +36,7 @@ claude plugin install living-worlds@living-worlds
 
 That adds the `render_world` tool, the `living-world` skill that studies a place before building it, and the gallery. Astrolabe members can install it from the Store.
 
-Any other MCP client can run the server with `uv --directory <this folder> run living-worlds`.
+Any other MCP client can run the server with `uv --project <this folder> run living-worlds` (`--project`, not `--directory`, so worlds land in and the gallery lists the folder you are working in).
 
 ## Built on
 

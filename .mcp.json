@@ -2,7 +2,7 @@
   "mcpServers": {
     "living-worlds": {
       "command": "uv",
-      "args": ["--directory", "${CLAUDE_PLUGIN_ROOT}", "run", "living-worlds"]
+      "args": ["--project", "${CLAUDE_PLUGIN_ROOT}", "run", "living-worlds"]
     }
   }
 }
