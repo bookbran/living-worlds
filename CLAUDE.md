@@ -15,5 +15,5 @@ One product: walk-in 3D worlds of real places (`render_world`) and the Maps gall
 
 - Every place-specific word comes from the world's data, never the template (`tests/checks.py` holds the line).
 - Keep the version in `pyproject.toml`, `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` the same; the Astrolabe Store compares the marketplace one.
-- Output goes to `GROUNDSTATION_OUT`, shared with Groundstation on purpose, so one gallery shows both.
+- Output goes to `viewer.out_root()`: `GROUNDSTATION_OUT`, else `demo/` in a checkout, else `~/Groundstation`. Groundstation's `tools.out_root` follows the same rule on purpose, so one gallery shows both; change them together.
 - Open question carried over from Groundstation: whether shared worlds travel as built files or as recipes (goggledefogger/second-brain-dashboard#1113).

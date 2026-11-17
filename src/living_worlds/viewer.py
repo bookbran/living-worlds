@@ -7,7 +7,7 @@ with living worlds loaded keeps the gallery answering; a second server finds the
 taken and leaves it to the first. Standard library only, so a plugin install
 needs nothing beyond what the MCP server already has.
 
-Where it looks: GROUNDSTATION_OUT (where Groundstation and render_world write by default),
+Where it looks: out_root() (GROUNDSTATION_OUT, else demo/ in a checkout, else ~/Groundstation),
 then a `groundstation/` folder and its `img/` beside wherever it was started
 (an Astrolabe brain keeps its maps there). Newest first.
 
@@ -46,12 +46,23 @@ WATER = json.dumps([
 NDWI = "(expression=%28b1-b2%29%2F%28b1%2Bb2%29&assets=green&assets=nir&rescale=-1%2C1)&colormap_name=rdylgn"
 
 
+def out_root() -> Path:
+    """Where maps and worlds go when no folder is given: GROUNDSTATION_OUT, else
+    demo/ in a repository checkout, else ~/Groundstation. Same rule as
+    Groundstation's tools.out_root, so both land in one gallery. An installed
+    plugin starts inside its own versioned install folder, so a cwd default
+    there strands every world at the next update"""
+    if os.environ.get("GROUNDSTATION_OUT"):
+        return Path(os.environ["GROUNDSTATION_OUT"])
+    cwd = Path.cwd()
+    return cwd / "demo" if (cwd / ".git").exists() else Path.home() / "Groundstation"
+
+
 def roots() -> list[Path]:
     """The folders the gallery lists, in order, each once."""
     out: list[Path] = []
     cwd = Path.cwd()
-    for p in (Path(os.environ["GROUNDSTATION_OUT"]) if os.environ.get("GROUNDSTATION_OUT") else cwd / "demo",
-              cwd / "groundstation", cwd / "groundstation" / "img"):
+    for p in (out_root(), cwd / "groundstation", cwd / "groundstation" / "img"):
         p = p.resolve()
         if p not in out:
             out.append(p)

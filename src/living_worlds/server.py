@@ -32,7 +32,7 @@ def _slug(text: str, max_len: int = 60) -> str:
 def _artifact_path(out_path: str | None, title: str) -> str:
     """Where the world goes. The default is GROUNDSTATION_OUT, so Groundstation's
     maps and these worlds land in one folder and one gallery."""
-    out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+    out_dir = viewer.out_root()
     if not out_path:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = str(out_dir / f"world-{_slug(title)}.html")
