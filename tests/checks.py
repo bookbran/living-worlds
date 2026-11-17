@@ -56,6 +56,29 @@ def t_gallery_switch_round_trip():
         os.environ["HOME"] = old
 
 
+def t_out_root_leaves_an_install_folder_for_home():
+    import os
+
+    from living_worlds import viewer
+
+    saved, cwd = os.environ.pop("GROUNDSTATION_OUT", None), os.getcwd()
+    install, repo = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+    (repo / ".git").mkdir()
+    try:
+        os.chdir(install)
+        assert viewer.out_root() == Path.home() / "Groundstation"
+        assert viewer.roots()[0] == (Path.home() / "Groundstation").resolve()
+        os.chdir(repo)
+        assert viewer.out_root() == Path.cwd() / "demo"
+        os.environ["GROUNDSTATION_OUT"] = str(install)
+        assert viewer.out_root() == install
+    finally:
+        os.chdir(cwd)
+        os.environ.pop("GROUNDSTATION_OUT", None)
+        if saved is not None:
+            os.environ["GROUNDSTATION_OUT"] = saved
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("t_"):
